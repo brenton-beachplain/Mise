@@ -981,9 +981,8 @@ option{color:var(--ink);background:var(--bg-card);}
         <div class="settings-row" id="cloud-signin-row" style="flex-direction:column;align-items:stretch;gap:8px">
           <div class="settings-row-label">email sign in</div>
           <input type="email" id="cloud-email" placeholder="you@example.com" autocomplete="email" style="width:100%;padding:10px 12px;border:1.5px solid var(--rule);border-radius:8px;background:var(--bg);font-size:14px;color:var(--ink);">
-          <button class="btn btn-green" onclick="cloudSendCode()">email me a sign-in code</button>
-          <div style="display:flex;gap:8px"><input type="text" id="cloud-code" placeholder="6-digit code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" style="flex:1;min-width:0;padding:10px 12px;border:1.5px solid var(--rule);border-radius:8px;background:var(--bg);font-size:16px;color:var(--ink);"><button class="btn btn-outline" onclick="cloudVerifyCode()">verify</button></div>
-          <div class="settings-row-sub">Use the same email on every device. Sign-in stays inside the app.</div>
+          <button class="btn btn-green" onclick="cloudSendMagicLink()">email me a sign-in link</button>
+          <div class="settings-row-sub">Use the same email on every device. No password is stored by Mise.</div>
         </div>
         <div class="settings-row" id="cloud-actions-row" style="display:none;flex-direction:column;align-items:stretch;gap:8px">
           <div style="display:flex;gap:8px"><button class="btn btn-outline" onclick="cloudPull()" style="flex:1">sync now</button><button class="btn btn-outline" onclick="cloudShowHistory()" style="flex:1">restore history</button></div>
@@ -4286,29 +4285,16 @@ function updateSyncButtons(){
   });
 }
 
-async function cloudSendCode(){
+async function cloudSendMagicLink(){
   const email=(document.getElementById('cloud-email').value||'').trim();
   if(!email){showToast('enter your email.');return;}
   const c=cloudConfig();
   try{
-    const res=await fetch(c.url+'/auth/v1/otp',{method:'POST',headers:{'apikey':c.publishableKey,'Content-Type':'application/json'},body:JSON.stringify({email,create_user:true})});
+    const redirect=encodeURIComponent(location.origin+location.pathname);
+    const res=await fetch(c.url+'/auth/v1/otp?redirect_to='+redirect,{method:'POST',headers:{'apikey':c.publishableKey,'Content-Type':'application/json'},body:JSON.stringify({email,create_user:true})});
     if(!res.ok)throw new Error(await res.text());
-    showToast('check your email for the 6-digit code.');
-  }catch(e){showToast('could not send sign-in code.');}
-}
-async function cloudVerifyCode(){
-  const email=(document.getElementById('cloud-email').value||'').trim();
-  const token=(document.getElementById('cloud-code').value||'').trim();
-  if(!email||!/^[0-9]{6}$/.test(token)){showToast('enter your email and 6-digit code.');return;}
-  const c=cloudConfig();
-  try{
-    const res=await fetch(c.url+'/auth/v1/verify',{method:'POST',headers:{'apikey':c.publishableKey,'Content-Type':'application/json'},body:JSON.stringify({email,token,type:'email'})});
-    if(!res.ok)throw new Error(await res.text());
-    const next=await res.json();
-    cloudSession={access_token:next.access_token,refresh_token:next.refresh_token,expires_at:Date.now()+Number(next.expires_in||3600)*1000};
-    localStorage.setItem(CLOUD_SESSION_KEY,JSON.stringify(cloudSession));
-    showToast('signed in.');await cloudLoadSession();
-  }catch(e){showToast('code invalid or expired.');}
+    showToast('check your email for the sign-in link.');
+  }catch(e){showToast('could not send sign-in link.');}
 }
 async function cloudLoadSession(){
   const hash=new URLSearchParams(location.hash.replace(/^#/,''));

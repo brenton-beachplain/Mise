@@ -11,9 +11,7 @@ describe('Supabase cloud backup',()=>{
     assert.match(config,/sb_publishable_/);
     assert.doesNotMatch(config,/service_role|postgresql:\/\//);
     assert.match(html,/Authorization':'Bearer '/);
-    assert.match(html,/id="cloud-code"/);
-    assert.match(html,/auth\/v1\/verify/);
-    assert.doesNotMatch(html,/auth\/v1\/otp\?redirect_to=/);
+    assert.match(html,/auth\/v1\/otp\?redirect_to=/);
   });
 
   it('does not auto-upload until initial cloud state has been checked',()=>{

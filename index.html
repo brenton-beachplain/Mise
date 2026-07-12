@@ -23,7 +23,6 @@
 <title>mise.</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/nosleep/0.12.0/NoSleep.min.js"></script>
-<script src="./js/supabase-config.js"></script>
 <style>
 :root {
   --bg: #F5F1EA;
@@ -971,25 +970,32 @@ option{color:var(--ink);background:var(--bg-card);}
       </div>
     </div>
     <div class="settings-section">
-      <div class="settings-heading">cloud backup</div>
-      <div style="font-size:12px;color:var(--ink-soft);margin:-4px 0 12px;line-height:1.5;">sign in on each device to sync and keep restorable history.</div>
+      <div class="settings-heading">share with household</div>
+      <div style="font-size:12px;color:var(--ink-soft);margin:-4px 0 12px;line-height:1.5;">keep two phones on the same kitchen.</div>
       <div class="fb-status-row">
         <div class="fb-dot" id="fb-dot"></div>
-        <div id="fb-status-text" style="font-size:11px;color:var(--ink-soft);">signed out</div>
+        <div id="fb-status-text" style="font-size:11px;color:var(--ink-soft);">not configured</div>
       </div>
       <div class="settings-card">
-        <div class="settings-row" id="cloud-signin-row" style="flex-direction:column;align-items:stretch;gap:8px">
-          <div class="settings-row-label">email sign in</div>
-          <input type="email" id="cloud-email" placeholder="you@example.com" autocomplete="email" style="width:100%;padding:10px 12px;border:1.5px solid var(--rule);border-radius:8px;background:var(--bg);font-size:14px;color:var(--ink);">
-          <button class="btn btn-green" onclick="cloudSendCode()">email me a sign-in code</button>
-          <div style="display:flex;gap:8px"><input type="text" id="cloud-code" placeholder="6-digit code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" style="flex:1;min-width:0;padding:10px 12px;border:1.5px solid var(--rule);border-radius:8px;background:var(--bg);font-size:16px;color:var(--ink);"><button class="btn btn-outline" onclick="cloudVerifyCode()">verify</button></div>
-          <div class="settings-row-sub">Use the same email on every device. Sign-in stays inside the app.</div>
+        <div style="display:flex;gap:8px;margin-bottom:4px;">
+          <button class="btn btn-outline" onclick="fbPull()" style="flex:1;padding:12px;">fetch now</button>
+          <button class="btn btn-outline" onclick="fbPush()" style="flex:1;padding:12px;">send now</button>
         </div>
-        <div class="settings-row" id="cloud-actions-row" style="display:none;flex-direction:column;align-items:stretch;gap:8px">
-          <div style="display:flex;gap:8px"><button class="btn btn-outline" onclick="cloudPull()" style="flex:1">sync now</button><button class="btn btn-outline" onclick="cloudShowHistory()" style="flex:1">restore history</button></div>
-          <button class="btn btn-outline" onclick="cloudSignOut()">sign out</button>
-        </div>
-        <div id="cloud-history" style="display:none"></div>
+        <details id="fb-connection-details">
+          <summary class="settings-row-label" style="cursor:pointer;list-style:none;padding:10px 0;color:var(--ink-soft);">connection settings</summary>
+          <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:6px">
+            <div class="settings-row-label">database URL</div>
+            <input type="url" id="fb-url-input" placeholder="https://mise-xxxxx-default-rtdb.firebaseio.com" autocomplete="off" style="width:100%;padding:10px 12px;border:1.5px solid var(--rule);border-radius:8px;background:var(--bg);font-family:var(--font-mono);font-size:11px;color:var(--ink);box-sizing:border-box;">
+          </div>
+          <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:6px;margin-top:8px;">
+            <div class="settings-row-label">sync key <span style="font-weight:400;color:var(--ink-faint)">(same on both phones)</span></div>
+            <input type="text" id="fb-key-input" placeholder="e.g. brianandjane-mise" autocomplete="off" autocorrect="off" autocapitalize="off" style="width:100%;padding:10px 12px;border:1.5px solid var(--rule);border-radius:8px;background:var(--bg);font-family:var(--font-mono);font-size:11px;color:var(--ink);box-sizing:border-box;">
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;">
+            <button class="btn btn-green" onclick="saveFbConfig()" style="flex:1;padding:12px;">save</button>
+          </div>
+          <div style="font-size:10px;color:var(--ink-faint);margin-top:10px;line-height:1.6;">keeps inventory, list, spots, and recipes in sync. auto-fetches on open, auto-sends after every change.</div>
+        </details>
       </div>
     </div>
     <div class="settings-section">
@@ -1957,7 +1963,7 @@ function init(){
   initSheetDrag();
   initKeyboardAvoidance();
   updateSyncButtons();
-  setTimeout(()=>cloudLoadSession(),800);
+  setTimeout(()=>fbPull(),800);
   renderHome();
   renderInventory();
   const urlRouted=handleUrlParams();
@@ -4185,21 +4191,20 @@ function confirmDeleteRecipe(){
   });
 }
 
-// ── SUPABASE CLOUD BACKUP ────────────────────────────────────────────────────
-const CLOUD_SESSION_KEY='mise_supabase_session_v1';
-const CLOUD_SYNCED_AT='mise_supabase_synced_at';
-let cloudSession=null,cloudUser=null,cloudReady=false,fbPushTimer=null;
+// ── FIREBASE SYNC ─────────────────────────────────────────────────────────────
+// Pure REST — no SDK. Isolated module: if FB_URL/FB_KEY not set it's a no-op.
+const FB_URL_KEY   = 'mise_fb_url';
+const FB_KEY_KEY   = 'mise_fb_key';
+const FB_SYNCED_AT = 'mise_fb_synced_at';
 
-function cloudConfig(){return window.MISE_SUPABASE||{};}
-function cloudHeaders(extra){
-  const c=cloudConfig();
-  return {'apikey':c.publishableKey,'Authorization':'Bearer '+cloudSession.access_token,'Content-Type':'application/json',...(extra||{})};
-}
-async function cloudRequest(path,options){
-  const c=cloudConfig();
-  const res=await fetch(c.url+path,{...(options||{}),headers:cloudHeaders(options&&options.headers)});
-  if(!res.ok)throw new Error((await res.text())||String(res.status));
-  return res.status===204?null:res.json();
+let fbPushTimer = null;   // debounce handle
+
+function fbUrl() {
+  const url = localStorage.getItem(FB_URL_KEY);
+  const key = localStorage.getItem(FB_KEY_KEY);
+  if (!url || !key) return null;
+  // sanitise: strip trailing slash, encode key
+  return url.replace(/\/+$/,'') + '/mise/' + encodeURIComponent(key) + '.json';
 }
 
 function fbSetStatus(state, text) {
@@ -4210,148 +4215,121 @@ function fbSetStatus(state, text) {
 }
 
 // ── PUSH ──────────────────────────────────────────────────────────────────────
-function cloudPayload(){return{items,shoppingList,locations,categories,recipes,staples,pushedAt:new Date().toISOString()};}
 async function fbPush() {
-  if(!cloudSession||!cloudUser||!cloudReady)return;
+  const url = fbUrl();
+  if (!url) return;
   fbSetStatus('syncing', 'sending…');
+  const payload = {
+    items, shoppingList, locations, categories, recipes,
+    pushedAt: new Date().toISOString(),
+  };
   try {
-    const current=await cloudRequest('/rest/v1/mise_snapshots?select=version&user_id=eq.'+encodeURIComponent(cloudUser.id));
-    const version=((current&&current[0]&&current[0].version)||0)+1;
-    await cloudRequest('/rest/v1/mise_snapshots?on_conflict=user_id',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({user_id:cloudUser.id,version,data:cloudPayload(),updated_at:new Date().toISOString()})});
+    const res = await fetch(url, {
+      method:  'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(res.status);
     const ts = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-    localStorage.setItem(CLOUD_SYNCED_AT,new Date().toISOString());
+    localStorage.setItem(FB_SYNCED_AT, new Date().toISOString());
     fbSetStatus('ok', 'synced · ' + ts);
   } catch(e) {
-    fbSetStatus('err','backup failed — try sync now');
+    fbSetStatus('err', 'send failed — check connection');
   }
 }
 
 // Debounced push — called after every save()
 function scheduleFbPush() {
-  if(!cloudReady||!cloudSession)return;
+  if (!fbUrl()) return;
   clearTimeout(fbPushTimer);
   fbPushTimer = setTimeout(fbPush, 2000);
 }
 
-function cloudApply(data){
-  cloudReady=false;
-  Kitchen.replaceItems(data.items||[]);
-  Kitchen.replaceShoppingList(data.shoppingList||[]);
-  Kitchen.replaceLocations(data.locations||DEFAULT_LOCS.slice());
-  Kitchen.replaceCategories(data.categories||DEFAULT_CATS.slice());
-  Kitchen.replaceRecipes((data.recipes||[]).map(migrateRecipe));
-  Kitchen.replaceStaples(data.staples||DEFAULT_STAPLES.slice());
-  save();saveRecipes();saveStaples();Kitchen.notify();
-  cloudReady=true;
-}
-async function cloudPull() {
-  if(!cloudSession||!cloudUser)return;
+// ── PULL ──────────────────────────────────────────────────────────────────────
+async function fbPull() {
+  const url = fbUrl();
+  if (!url) return;
   fbSetStatus('syncing', 'fetching…');
   try {
-    const rows=await cloudRequest('/rest/v1/mise_snapshots?select=data,version,updated_at&user_id=eq.'+encodeURIComponent(cloudUser.id));
-    if(rows&&rows[0])cloudApply(rows[0].data);
-    else{
-      cloudReady=true;
-      if(items.length||shoppingList.length||recipes.length){
-        showConfirm('create cloud backup?','No cloud copy exists yet. Upload this device’s current kitchen?','upload',()=>fbPush());
-      }else fbSetStatus('ok','connected · cloud is empty');
-      return;
-    }
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(res.status);
+    const remote = await res.json();
+    if (!remote) { fbSetStatus('ok', 'no remote data yet — send first'); return; }
+
+    // Merge by ID so simultaneous edits on both phones don't wipe each other
+    // Mechanical write through Kitchen (array identity preserved for aliases)
+    Kitchen.applyRemoteMerge({
+      items:        mergeById(items,        remote.items        || []),
+      shoppingList: mergeById(shoppingList, remote.shoppingList || []),
+      recipes:      mergeById(recipes,      (remote.recipes     || []).map(migrateRecipe)),
+      locations:    unionArr(locations,  remote.locations  || []),
+      categories:   unionArr(categories, remote.categories || []),
+    });
+
     const ts = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-    localStorage.setItem(CLOUD_SYNCED_AT,new Date().toISOString());
+    localStorage.setItem(FB_SYNCED_AT, new Date().toISOString());
     fbSetStatus('ok', 'synced · ' + ts);
     showToast('synced.');
   } catch(e) {
-    fbSetStatus('err','sync failed — check setup');
+    fbSetStatus('err', 'fetch failed — check url and key');
   }
 }
 
+// ── MERGE HELPERS ─────────────────────────────────────────────────────────────
+// Union two arrays of objects by .id — local copy wins on conflict
+function mergeById(local, remote) {
+  const map = {};
+  for (const item of remote) if (item && item.id) map[item.id] = item;
+  for (const item of local)  if (item && item.id) map[item.id] = item; // local overwrites
+  return Object.values(map);
+}
+// Union two string arrays, deduplicated, local order first
+function unionArr(local, remote) {
+  return [...new Set([...local, ...remote])];
+}
+
+// ── CONFIG ────────────────────────────────────────────────────────────────────
+function saveFbConfig() {
+  const url = (document.getElementById('fb-url-input').value  || '').trim();
+  const key = (document.getElementById('fb-key-input').value  || '').trim();
+  if (!url || !key) { showToast('enter both url and sync key.'); return; }
+  localStorage.setItem(FB_URL_KEY,  url);
+  localStorage.setItem(FB_KEY_KEY,  key);
+  renderFbStatus();
+  showToast('connection saved.');
+  fbPull();   // pull immediately so both phones start from the same state
+}
+
 function renderFbStatus() {
-  const signin=document.getElementById('cloud-signin-row'),actions=document.getElementById('cloud-actions-row');
-  if(signin)signin.style.display=cloudUser?'none':'flex';
-  if(actions)actions.style.display=cloudUser?'flex':'none';
+  const url = localStorage.getItem(FB_URL_KEY);
+  const key = localStorage.getItem(FB_KEY_KEY);
+  const inp = document.getElementById('fb-url-input');
+  const ki  = document.getElementById('fb-key-input');
+  const det = document.getElementById('fb-connection-details');
+  if (inp && url) inp.value = url;
+  if (ki  && key) ki.value  = key;
+  if (det) det.open = !!(url && key); // open by default if already configured
   updateSyncButtons();
-  if(!cloudUser){fbSetStatus('','signed out');return;}
-  const synced=localStorage.getItem(CLOUD_SYNCED_AT);
+  if (!url || !key) { fbSetStatus('', 'not configured'); return; }
+  const synced = localStorage.getItem(FB_SYNCED_AT);
   if (synced) {
     const ts = new Date(synced).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-    fbSetStatus('ok','protected · last synced '+ts);
-  }else fbSetStatus('','signed in · not yet backed up');
+    fbSetStatus('ok', 'connected · last synced ' + ts);
+  } else {
+    fbSetStatus('', 'connected — not yet synced');
+  }
 }
 function updateSyncButtons(){
-  const show=!!cloudUser;
+  const show=!!fbUrl();
   ['station-sync-btn','list-sync-btn'].forEach(id=>{
     const el=document.getElementById(id);
     if(el)el.classList.toggle('visible',show);
   });
 }
 
-async function cloudSendCode(){
-  const email=(document.getElementById('cloud-email').value||'').trim();
-  if(!email){showToast('enter your email.');return;}
-  const c=cloudConfig();
-  try{
-    const res=await fetch(c.url+'/auth/v1/otp',{method:'POST',headers:{'apikey':c.publishableKey,'Content-Type':'application/json'},body:JSON.stringify({email,create_user:true})});
-    if(!res.ok)throw new Error(await res.text());
-    showToast('check your email for the 6-digit code.');
-  }catch(e){showToast('could not send sign-in code.');}
-}
-async function cloudVerifyCode(){
-  const email=(document.getElementById('cloud-email').value||'').trim();
-  const token=(document.getElementById('cloud-code').value||'').trim();
-  if(!email||!/^[0-9]{6}$/.test(token)){showToast('enter your email and 6-digit code.');return;}
-  const c=cloudConfig();
-  try{
-    const res=await fetch(c.url+'/auth/v1/verify',{method:'POST',headers:{'apikey':c.publishableKey,'Content-Type':'application/json'},body:JSON.stringify({email,token,type:'email'})});
-    if(!res.ok)throw new Error(await res.text());
-    const next=await res.json();
-    cloudSession={access_token:next.access_token,refresh_token:next.refresh_token,expires_at:Date.now()+Number(next.expires_in||3600)*1000};
-    localStorage.setItem(CLOUD_SESSION_KEY,JSON.stringify(cloudSession));
-    showToast('signed in.');await cloudLoadSession();
-  }catch(e){showToast('code invalid or expired.');}
-}
-async function cloudLoadSession(){
-  const hash=new URLSearchParams(location.hash.replace(/^#/,''));
-  if(hash.get('access_token')){
-    cloudSession={access_token:hash.get('access_token'),refresh_token:hash.get('refresh_token')||'',expires_at:Date.now()+Number(hash.get('expires_in')||3600)*1000};
-    localStorage.setItem(CLOUD_SESSION_KEY,JSON.stringify(cloudSession));
-    history.replaceState(null,'',location.pathname+location.search);
-  }else{try{cloudSession=JSON.parse(localStorage.getItem(CLOUD_SESSION_KEY));}catch(e){cloudSession=null;}}
-  if(!cloudSession)return;
-  try{
-    const c=cloudConfig();
-    if(cloudSession.expires_at&&cloudSession.expires_at<Date.now()+60000&&cloudSession.refresh_token){
-      const refresh=await fetch(c.url+'/auth/v1/token?grant_type=refresh_token',{method:'POST',headers:{'apikey':c.publishableKey,'Content-Type':'application/json'},body:JSON.stringify({refresh_token:cloudSession.refresh_token})});
-      if(!refresh.ok)throw new Error(refresh.status);
-      const next=await refresh.json();
-      cloudSession={access_token:next.access_token,refresh_token:next.refresh_token,expires_at:Date.now()+Number(next.expires_in||3600)*1000};
-      localStorage.setItem(CLOUD_SESSION_KEY,JSON.stringify(cloudSession));
-    }
-    const res=await fetch(c.url+'/auth/v1/user',{headers:{'apikey':c.publishableKey,'Authorization':'Bearer '+cloudSession.access_token}});
-    if(!res.ok)throw new Error(res.status);
-    cloudUser=await res.json();renderFbStatus();await cloudPull();
-  }catch(e){cloudSession=null;cloudUser=null;localStorage.removeItem(CLOUD_SESSION_KEY);renderFbStatus();}
-}
-function cloudSignOut(){
-  cloudReady=false;cloudUser=null;cloudSession=null;localStorage.removeItem(CLOUD_SESSION_KEY);renderFbStatus();showToast('signed out. local copy kept.');
-}
-async function cloudShowHistory(){
-  try{
-    const rows=await cloudRequest('/rest/v1/mise_snapshot_history?select=id,version,created_at,data&user_id=eq.'+encodeURIComponent(cloudUser.id)+'&order=created_at.desc&limit=20');
-    const el=document.getElementById('cloud-history');el.style.display='block';
-    el.innerHTML=(rows||[]).map(r=>`<div class="settings-row"><div style="flex:1"><div class="settings-row-label">version ${r.version}</div><div class="settings-row-sub">${esc(new Date(r.created_at).toLocaleString())} · ${(r.data.items||[]).length} items</div></div><button class="s-btn s-btn-rename" onclick="cloudRestore(${r.id})">restore</button></div>`).join('')||'<div class="settings-row-sub" style="padding:14px">no history yet.</div>';
-  }catch(e){showToast('could not load history.');}
-}
-async function cloudRestore(id){
-  const rows=await cloudRequest('/rest/v1/mise_snapshot_history?select=data&id=eq.'+encodeURIComponent(id)+'&user_id=eq.'+encodeURIComponent(cloudUser.id));
-  if(!rows||!rows[0])return;
-  showConfirm('restore this version?','Your current version remains in history.','restore',()=>{cloudApply(rows[0].data);fbPush();showToast('version restored.');});
-}
-const fbPull=cloudPull;
-
 // Auto-pull when tab becomes visible (catches background/switch)
 document.addEventListener('visibilitychange', () => {
-  if(document.visibilityState==='visible'&&cloudUser)cloudPull();
+  if (document.visibilityState === 'visible') fbPull();
 });
 
 // Module scripts are deferred; classic script may run first. Boot only after bridges exist.

@@ -1063,6 +1063,10 @@ option{color:var(--ink);background:var(--bg-card);}
       <div class="settings-heading">about</div>
       <div class="settings-card">
         <div class="settings-row">
+          <div style="flex:1"><div class="settings-row-label">app updates</div><div class="settings-row-sub">fetch the latest version and restart mise. your data stays on this device.</div></div>
+          <button class="s-btn s-btn-edit" id="app-update-btn" onclick="refreshApp()">check &amp; reload</button>
+        </div>
+        <div class="settings-row">
           <div><div class="settings-row-label">mise.</div><div class="settings-row-sub">your kitchen, prepped.</div></div>
         </div>
         <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:6px">
@@ -1177,7 +1181,7 @@ option{color:var(--ink);background:var(--bg-card);}
             <label>restock below</label>
             <div class="qty-stepper">
               <button type="button" class="qty-step-btn" data-step="f-thresh" data-d="-1">−</button>
-              <input class="qty-step-input" type="number" id="f-thresh" value="1" min="0" inputmode="numeric">
+              <input class="qty-step-input" type="number" id="f-thresh" value="0" min="0" inputmode="numeric">
               <button type="button" class="qty-step-btn" data-step="f-thresh" data-d="1">+</button>
             </div>
           </div>
@@ -1592,7 +1596,7 @@ const Kitchen = (() => {
         category:ensureCat(fields.category),
         location:ensureLoc(fields.location),
         qty:ensureNonNegInt(fields.qty),
-        threshold:ensureNonNegInt(fields.threshold!=null?fields.threshold:1)||1,
+        threshold:ensureNonNegInt(fields.threshold!=null?fields.threshold:0),
         notes:fields.notes||'',
         expiry:fields.expiry||'',
         noAlert:!!fields.noAlert,
@@ -1614,7 +1618,7 @@ const Kitchen = (() => {
         next.name=name;
       }
       if(fields.qty!=null) next.qty=ensureNonNegInt(fields.qty);
-      if(fields.threshold!=null) next.threshold=ensureNonNegInt(fields.threshold)||1;
+      if(fields.threshold!=null) next.threshold=ensureNonNegInt(fields.threshold);
       if(fields.location!=null) next.location=ensureLoc(fields.location);
       if(fields.category!=null) next.category=ensureCat(fields.category);
       if(fields.lastConfirmed==null) next.lastConfirmed=Date.now();
@@ -1742,7 +1746,7 @@ const Kitchen = (() => {
             category,
             location,
             qty:ensureNonNegInt(r.qty)||1,
-            threshold:1,
+            threshold:0,
             notes:r.notes||'',
             expiry:r.expiry||'',
             lastConfirmed:Date.now(),
@@ -2091,8 +2095,50 @@ function handleUrlParams(){
 }
 
 // ── SERVICE WORKER ────────────────────────────────────────────────────────────
+let serviceWorkerRegistration=null;
 if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+  navigator.serviceWorker.register('./sw.js').then(registration=>{
+    serviceWorkerRegistration=registration;
+  }).catch(()=>{});
+}
+
+async function refreshApp(){
+  const button=document.getElementById('app-update-btn');
+  if(button){button.disabled=true;button.textContent='checking…';}
+  if(!('serviceWorker' in navigator)){
+    window.location.reload();
+    return;
+  }
+
+  let reloadStarted=false;
+  const reload=()=>{
+    if(reloadStarted)return;
+    reloadStarted=true;
+    window.location.reload();
+  };
+  navigator.serviceWorker.addEventListener('controllerchange',reload,{once:true});
+
+  try{
+    const registration=serviceWorkerRegistration||await navigator.serviceWorker.ready;
+    await registration.update();
+    if(registration.waiting){
+      registration.waiting.postMessage({type:'SKIP_WAITING'});
+      setTimeout(reload,1500);
+      return;
+    }
+    if(registration.installing){
+      registration.installing.addEventListener('statechange',()=>{
+        if(registration.installing&&registration.installing.state==='activated')reload();
+      });
+      setTimeout(reload,3000);
+      return;
+    }
+    reload();
+  }catch(error){
+    navigator.serviceWorker.removeEventListener('controllerchange',reload);
+    if(button){button.disabled=false;button.textContent='check & reload';}
+    showToast(navigator.onLine?'update failed. try again.':'offline — connect to update.');
+  }
 }
 
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
@@ -2419,7 +2465,7 @@ function openAddSheet(prefill,prefillLoc){
   document.getElementById('sheet-title').textContent='place item';
   document.getElementById('f-name').value=prefill||'';
   document.getElementById('f-qty').value=1;
-  document.getElementById('f-thresh').value=1;
+  document.getElementById('f-thresh').value=0;
   document.getElementById('f-notes').value='';
   document.getElementById('f-expiry').value='';
   setNoAlertToggle(false);
@@ -2480,7 +2526,7 @@ function saveItem(){
     category:document.getElementById('f-category').value,
     location:document.getElementById('f-location').value,
     qty:parseInt(document.getElementById('f-qty').value)||0,
-    threshold:parseInt(document.getElementById('f-thresh').value)||1,
+    threshold:document.getElementById('f-thresh').value,
     notes:document.getElementById('f-notes').value.trim(),
     expiry:document.getElementById('f-expiry').value||'',
     noAlert:document.getElementById('f-noAlert').checked,

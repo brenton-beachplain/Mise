@@ -1,4 +1,4 @@
-const VERSION = '12'; // bump VERSION on deploy
+const VERSION = '13'; // bump VERSION on deploy
 const CACHE = 'mise-' + VERSION;
 const SHELL = ['./index.html', './manifest.json', './icon.svg', './js/interpret.js', './js/planner.js',
   './js/vendor/barcode-detector-ponyfill.js', './js/vendor/zxing_reader.wasm'];

@@ -49,3 +49,33 @@ describe('Kitchen restock threshold', () => {
     assert.match(html, /function openAddSheet[\s\S]*?getElementById\('f-thresh'\)\.value=0;/);
   });
 });
+
+describe('Kitchen settings order', () => {
+  it('moves locations and categories and persists each change', () => {
+    const { Kitchen, saveCount } = loadKitchen();
+    Kitchen.replaceLocations(['Pantry', 'Fridge', 'Freezer']);
+    Kitchen.replaceCategories(['Produce', 'Dairy', 'Other']);
+
+    assert.equal(Kitchen.moveLocation(2, -1), true);
+    assert.deepEqual([...Kitchen.locations()], ['Pantry', 'Freezer', 'Fridge']);
+    assert.equal(Kitchen.moveCategory(0, 1), true);
+    assert.deepEqual([...Kitchen.categories()], ['Dairy', 'Produce', 'Other']);
+    assert.equal(saveCount(), 2);
+  });
+
+  it('rejects moves beyond either end without persisting', () => {
+    const { Kitchen, saveCount } = loadKitchen();
+    Kitchen.replaceLocations(['Pantry', 'Fridge']);
+    Kitchen.replaceCategories(['Produce', 'Other']);
+
+    assert.equal(Kitchen.moveLocation(0, -1), false);
+    assert.equal(Kitchen.moveCategory(1, 1), false);
+    assert.equal(saveCount(), 0);
+  });
+
+  it('populates item-entry selects in the persisted array order', () => {
+    const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+    assert.match(html, /f-category'\)\.innerHTML=categories\.map/);
+    assert.match(html, /f-location'\)\.innerHTML=locations\.map/);
+  });
+});
